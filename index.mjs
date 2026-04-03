@@ -1,4 +1,4 @@
-import { jsx, jsxs } from "react/jsx-runtime";
+import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 const GH_API = "https://api.github.com";
 const GH_RAW = "https://raw.githubusercontent.com";
 const plugin = ({ React, ui, store, sdk, icons }) => {
@@ -7,7 +7,8 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
   store.registerType("tree", [
     { key: "title", label: "Tytuł", required: true },
     { key: "branches", label: "Gałęzie" },
-    { key: "edges", label: "Krawędzie" }
+    { key: "edges", label: "Krawędzie" },
+    { key: "repo", label: "Repo" }
   ], "Drzewa wiedzy");
   store.registerType("node", [
     { key: "nodeId", label: "ID", required: true },
@@ -28,12 +29,6 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
     { key: "example", label: "Przykład" },
     { key: "category", label: "Kategoria" }
   ], "Leksykon");
-  store.registerType("context", [
-    { key: "ctxType", label: "Typ", required: true },
-    { key: "title", label: "Tytuł", required: true },
-    { key: "lexiconIds", label: "Terminy" },
-    { key: "contextData", label: "Dane" }
-  ], "Konteksty");
   store.registerType("discovery", [
     { key: "termId", label: "Termin", required: true },
     { key: "hits", label: "Odkrycia" },
@@ -60,7 +55,6 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
     const n = store.get(postId);
     if (n) store.update(postId, { hits: (Number(n.data.hits) || 0) + 1 });
   };
-  sdk.shared.setState({ bqHelpers: { discover, unlockNode, edgeStr } });
   const useNav = sdk.create(() => ({
     treeId: null,
     sel: null,
@@ -74,27 +68,27 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
       return fb;
     }
   };
-  const generateContexts = (treeId) => {
-    const lexicon = store.getPosts("lexicon").filter((l) => l.parentId === treeId);
-    const categories = /* @__PURE__ */ new Map();
-    for (const lex of lexicon) {
-      const cat = String(lex.data.category || "inne");
-      if (!categories.has(cat)) categories.set(cat, []);
-      categories.get(cat).push(lex.id);
-    }
-    for (const [cat, ids] of categories) {
-      store.add("context", {
-        ctxType: cat,
-        title: cat.charAt(0).toUpperCase() + cat.slice(1),
-        lexiconIds: JSON.stringify(ids),
-        contextData: "{}"
-      }, { parentId: treeId });
-    }
-  };
   function SkillTree() {
     const { treeId, sel, phase } = useNav();
     const tree = store.usePost(treeId || "");
     const nodes = store.useChildren(treeId || "", "node");
+    const flash = sdk.shared((s) => s == null ? void 0 : s.bqFlash);
+    const [discoveredPairs, setDiscoveredPairs] = useState([]);
+    useEffect(() => {
+      if (!flash) return;
+      const fromNode = nodes.find((n) => String(n.data.title) === flash.from);
+      const toNode = nodes.find((n) => String(n.data.title) === flash.to);
+      if (fromNode && toNode) {
+        const fromNid = String(fromNode.data.nodeId);
+        const toNid = String(toNode.data.nodeId);
+        setDiscoveredPairs((prev) => {
+          if (prev.some((p) => p.fromNid === fromNid && p.toNid === toNid || p.fromNid === toNid && p.toNid === fromNid))
+            return prev.map((p) => p.fromNid === fromNid && p.toNid === toNid || p.fromNid === toNid && p.toNid === fromNid ? { ...p, fresh: true } : p);
+          return [...prev.map((p) => ({ ...p, fresh: false })), { fromNid, toNid, fresh: true }];
+        });
+        sdk.shared.setState({ bqFlash: null });
+      }
+    }, [flash]);
     const edges = useMemo(() => tree ? jparse(String(tree.data.edges || "[]"), []) : [], [tree]);
     const branches = useMemo(() => tree ? jparse(String(tree.data.branches || "{}"), {}) : {}, [tree]);
     const adj = useMemo(() => {
@@ -245,13 +239,53 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
         style: { width: "100%", height: "100%", cursor: "grab", userSelect: "none", display: "block" },
         onMouseDown: onDown,
         children: [
-          /* @__PURE__ */ jsx("defs", { children: /* @__PURE__ */ jsxs("filter", { id: "glow", children: [
-            /* @__PURE__ */ jsx("feGaussianBlur", { stdDeviation: "3", result: "blur" }),
-            /* @__PURE__ */ jsxs("feMerge", { children: [
-              /* @__PURE__ */ jsx("feMergeNode", { in: "blur" }),
-              /* @__PURE__ */ jsx("feMergeNode", { in: "SourceGraphic" })
+          /* @__PURE__ */ jsxs("defs", { children: [
+            /* @__PURE__ */ jsxs("filter", { id: "glow", children: [
+              /* @__PURE__ */ jsx("feGaussianBlur", { stdDeviation: "3", result: "blur" }),
+              /* @__PURE__ */ jsxs("feMerge", { children: [
+                /* @__PURE__ */ jsx("feMergeNode", { in: "blur" }),
+                /* @__PURE__ */ jsx("feMergeNode", { in: "SourceGraphic" })
+              ] })
+            ] }),
+            /* @__PURE__ */ jsxs("filter", { id: "flashGlow", children: [
+              /* @__PURE__ */ jsx("feGaussianBlur", { stdDeviation: "6", result: "blur" }),
+              /* @__PURE__ */ jsxs("feMerge", { children: [
+                /* @__PURE__ */ jsx("feMergeNode", { in: "blur" }),
+                /* @__PURE__ */ jsx("feMergeNode", { in: "blur" }),
+                /* @__PURE__ */ jsx("feMergeNode", { in: "SourceGraphic" })
+              ] })
             ] })
-          ] }) }),
+          ] }),
+          discoveredPairs.map((pair, i) => {
+            const f = layout.get(pair.fromNid), t = layout.get(pair.toNid);
+            if (!f || !t) return null;
+            return /* @__PURE__ */ jsxs("g", { children: [
+              /* @__PURE__ */ jsx(
+                "line",
+                {
+                  x1: f.x,
+                  y1: f.y,
+                  x2: t.x,
+                  y2: t.y,
+                  stroke: "#f59e0b",
+                  strokeWidth: pair.fresh ? 4 : 3,
+                  opacity: pair.fresh ? 0.8 : 0.5,
+                  filter: "url(#glow)",
+                  children: pair.fresh && /* @__PURE__ */ jsx("animate", { attributeName: "opacity", values: "1;0.4;1;0.8", dur: "1s", repeatCount: "3", fill: "freeze" })
+                }
+              ),
+              pair.fresh && /* @__PURE__ */ jsxs(Fragment, { children: [
+                /* @__PURE__ */ jsxs("circle", { cx: f.x, cy: f.y, r: 28, fill: "none", stroke: "#f59e0b", strokeWidth: 2, children: [
+                  /* @__PURE__ */ jsx("animate", { attributeName: "r", values: "25;35;28", dur: "1s", repeatCount: "3", fill: "freeze" }),
+                  /* @__PURE__ */ jsx("animate", { attributeName: "opacity", values: "0.8;0.3;0.4", dur: "1s", repeatCount: "3", fill: "freeze" })
+                ] }),
+                /* @__PURE__ */ jsxs("circle", { cx: t.x, cy: t.y, r: 28, fill: "none", stroke: "#f59e0b", strokeWidth: 2, children: [
+                  /* @__PURE__ */ jsx("animate", { attributeName: "r", values: "25;35;28", dur: "1s", repeatCount: "3", fill: "freeze" }),
+                  /* @__PURE__ */ jsx("animate", { attributeName: "opacity", values: "0.8;0.3;0.4", dur: "1s", repeatCount: "3", fill: "freeze" })
+                ] })
+              ] })
+            ] }, `dp-${i}`);
+          }),
           contextEdges.map((ce, i) => {
             const f = layout.get(ce.from), t = layout.get(ce.to);
             return f && t ? /* @__PURE__ */ jsx(
@@ -335,19 +369,54 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
   }
   const DEFAULT_ORG = "BrainEduPlay";
   const loadTree = async (org, repo) => {
+    var _a, _b;
     try {
-      const r = await fetch(`${GH_RAW}/${org}/${repo}/main/pack.json`);
-      if (!r.ok) throw new Error(`GitHub: ${r.status}`);
-      const seeds = JSON.parse(await r.text());
-      const count = store.importJSON(seeds);
-      sdk.log(`${repo} — ${count} rekordów`, "ok");
+      const base = `${GH_RAW}/${org}/${repo}/main`;
+      const treeRes = await fetch(`${base}/tree.json`);
+      if (!treeRes.ok) throw new Error(`tree.json: ${treeRes.status}`);
+      const treeSeeds = JSON.parse(await treeRes.text());
+      const treeTitleFromSeed = ((_b = (_a = treeSeeds[0]) == null ? void 0 : _a.data) == null ? void 0 : _b.title) || "";
+      const treeCount = store.importJSON(treeSeeds);
+      const lexRes = await fetch(`${base}/lexicon.json`);
+      if (!lexRes.ok) throw new Error(`lexicon.json: ${lexRes.status}`);
+      const lexSeeds = JSON.parse(await lexRes.text());
       const trees = store.getPosts("tree");
-      const tree = trees.find((t) => String(t.data.title).toLowerCase().includes(repo.replace(/-/g, " ")));
-      if (tree) generateContexts(tree.id);
+      const tree = trees.find((t) => String(t.data.title) === treeTitleFromSeed);
+      if (tree) {
+        let lexCount = 0;
+        for (const l of lexSeeds) {
+          store.add(l.type, l.data, { parentId: tree.id });
+          lexCount++;
+        }
+        sdk.log(`${repo} — ${treeCount + lexCount} rekordów`, "ok");
+      }
+      if (tree) store.update(tree.id, { repo: `${org}/${repo}` });
     } catch (e) {
       sdk.log(String(e), "error");
     }
   };
+  const loadNodeContent = async (treeId, nodeId) => {
+    const tree = store.get(treeId);
+    if (!tree) return;
+    const repo = String(tree.data.repo || "");
+    if (!repo) return;
+    const nodes = store.getPosts("node").filter((n) => n.parentId === treeId);
+    const node = nodes.find((n) => String(n.data.nodeId) === nodeId);
+    if (!node) return;
+    const existing = store.getPosts("content").filter((c) => c.parentId === node.id);
+    if (existing.length > 0) return;
+    try {
+      const r = await fetch(`${GH_RAW}/${repo}/main/content/${nodeId}.json`);
+      if (!r.ok) return;
+      const entries = JSON.parse(await r.text());
+      for (const e of entries) {
+        store.add(e.type, e.data, { parentId: node.id });
+      }
+    } catch (e) {
+      sdk.log(`Content ${nodeId}: ${e}`, "error");
+    }
+  };
+  sdk.shared.setState({ bqHelpers: { discover, unlockNode, edgeStr, loadNodeContent } });
   function RepoPicker() {
     const org = store.useOption("bq:githubOrg") || DEFAULT_ORG;
     const [repos, setRepos] = useState([]);
