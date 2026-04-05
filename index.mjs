@@ -334,12 +334,12 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
     const contents = store.useChildren(id, "content");
     const hasContent = contents.some((c) => String(c.data.contentType) !== "quiz");
     const slideCount = contents.filter((c) => String(c.data.contentType) !== "quiz").length;
-    return /* @__PURE__ */ jsx("div", { style: { flexShrink: 0, padding: "8px" }, children: /* @__PURE__ */ jsx(ui.Card, { children: /* @__PURE__ */ jsxs(ui.Stack, { children: [
+    return /* @__PURE__ */ jsx(ui.Card, { children: /* @__PURE__ */ jsxs(ui.Stack, { children: [
       /* @__PURE__ */ jsxs(ui.Row, { justify: "between", children: [
         /* @__PURE__ */ jsx(ui.Heading, { title: String(node.data.title) }),
         /* @__PURE__ */ jsxs(ui.Row, { gap: "sm", children: [
           /* @__PURE__ */ jsx(ui.Badge, { children: s >= 1 ? "★ Opanowane" : s > 0 ? "Odkryte" : "Nieznane" }),
-          /* @__PURE__ */ jsx("span", { style: { cursor: "pointer" }, onClick: () => useNav.setState({ phase: "map", sel: null }), children: /* @__PURE__ */ jsx(X, { size: 14 }) })
+          /* @__PURE__ */ jsx(ui.Button, { size: "xs", color: "ghost", onClick: () => useNav.setState({ phase: "map", sel: null }), children: /* @__PURE__ */ jsx(X, { size: 14 }) })
         ] })
       ] }),
       hasContent && /* @__PURE__ */ jsxs(ui.Text, { muted: true, size: "sm", children: [
@@ -361,7 +361,7 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
           " Arena"
         ] })
       ] })
-    ] }) }) });
+    ] }) });
   }
   const DEFAULT_ORG = "BrainEduPlay";
   const loadLexicon = async (base, tree) => {
@@ -476,17 +476,14 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
     const { treeId } = useNav();
     const trees = store.usePosts("tree");
     if (!trees.length) return null;
-    return /* @__PURE__ */ jsx(ui.Page, { children: /* @__PURE__ */ jsxs(ui.Stack, { children: [
-      /* @__PURE__ */ jsx(ui.Heading, { title: "Drzewa wiedzy" }),
-      trees.map((t) => /* @__PURE__ */ jsx(TreeItem, { tree: t, active: treeId === t.id }, t.id))
-    ] }) });
+    return /* @__PURE__ */ jsx(ui.Box, { header: /* @__PURE__ */ jsx(ui.Cell, { label: true, children: "Drzewa wiedzy" }), body: /* @__PURE__ */ jsx(ui.Stack, { children: trees.map((t) => /* @__PURE__ */ jsx(TreeItem, { tree: t, active: treeId === t.id }, t.id)) }), grow: true });
   }
   function Progress() {
     const { treeId } = useNav();
     const nodes = store.useChildren(treeId || "", "node");
     if (!treeId) return /* @__PURE__ */ jsx(ui.Placeholder, { text: "Wybierz drzewo" });
     const d = nodes.filter((n) => Number(n.data.hits) > 0);
-    return /* @__PURE__ */ jsx(ui.Page, { children: /* @__PURE__ */ jsxs(ui.Stack, { children: [
+    return /* @__PURE__ */ jsx(ui.Box, { header: /* @__PURE__ */ jsx(ui.Cell, { label: true, children: "Postęp" }), body: /* @__PURE__ */ jsxs(ui.Stack, { children: [
       /* @__PURE__ */ jsxs(ui.Stats, { children: [
         /* @__PURE__ */ jsx(ui.Stat, { label: "Odkryte", value: `${d.length}/${nodes.length}` }),
         /* @__PURE__ */ jsx(ui.Stat, { label: "Opanowane", value: nodes.filter((n) => str(n) >= 1).length })
@@ -496,7 +493,7 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
         str(n) >= 1 ? /* @__PURE__ */ jsx(Star, { size: 12 }) : /* @__PURE__ */ jsx(Check, { size: 12 }),
         /* @__PURE__ */ jsx(ui.Text, { size: "sm", children: String(n.data.title) })
       ] }, n.id))
-    ] }) });
+    ] }), grow: true });
   }
   function Center() {
     const { treeId, phase, sel } = useNav();
