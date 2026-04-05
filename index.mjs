@@ -24,9 +24,10 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
   ], "Treści");
   store.registerType("lexicon", [
     { key: "term", label: "Termin", required: true },
-    { key: "forms", label: "Formy" },
+    { key: "nodes", label: "Węzły", required: true },
     { key: "definition", label: "Definicja", required: true },
-    { key: "example", label: "Przykład" },
+    { key: "quiz", label: "Quiz" },
+    { key: "forms", label: "Formy" },
     { key: "category", label: "Kategoria" }
   ], "Leksykon");
   store.registerType("discovery", [
@@ -162,32 +163,27 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
       return pos;
     }, [rootNid, adj]);
     const discoveries = store.usePosts("discovery");
+    const terms = store.useChildren(treeId || "", "lexicon");
     const contextEdges = useMemo(() => {
       const discoveredTermIds = new Set(discoveries.map((d) => String(d.data.termId)));
       if (!discoveredTermIds.size) return [];
-      const lexicon = store.getPosts("lexicon");
-      const catToNodes = /* @__PURE__ */ new Map();
-      for (const lex of lexicon) {
-        if (!discoveredTermIds.has(lex.id)) continue;
-        const cat = String(lex.data.category || "");
-        if (!cat) continue;
-        if (!catToNodes.has(cat)) catToNodes.set(cat, /* @__PURE__ */ new Set());
-        for (const n of nodes) {
-          if (!discovered.has(String(n.data.nodeId))) continue;
-          if (String(n.data.branch).toLowerCase() === cat.toLowerCase() || String(n.data.title).toLowerCase().includes(cat.toLowerCase()))
-            catToNodes.get(cat).add(String(n.data.nodeId));
-        }
-      }
       const pairs = [];
-      for (const [, nids] of catToNodes) {
-        const arr = [...nids];
-        for (let i = 0; i < arr.length; i++)
-          for (let j = i + 1; j < arr.length; j++)
-            if (visible.has(arr[i]) && visible.has(arr[j]))
-              pairs.push({ from: arr[i], to: arr[j], strength: Math.min(nids.size / 3, 1) });
+      const seen = /* @__PURE__ */ new Set();
+      for (const term of terms) {
+        if (!discoveredTermIds.has(term.id)) continue;
+        const termNodes = jparse(String(term.data.nodes || "[]"), []);
+        if (termNodes.length < 2) continue;
+        for (let i = 0; i < termNodes.length; i++)
+          for (let j = i + 1; j < termNodes.length; j++) {
+            if (!visible.has(termNodes[i]) || !visible.has(termNodes[j])) continue;
+            const key = [termNodes[i], termNodes[j]].sort().join(":");
+            if (seen.has(key)) continue;
+            seen.add(key);
+            pairs.push({ from: termNodes[i], to: termNodes[j], strength: 0.6 });
+          }
       }
       return pairs;
-    }, [discoveries, nodes, discovered, visible]);
+    }, [discoveries, terms, visible]);
     const focusNid = sel ? (() => {
       const n = store.get(sel);
       return n ? String(n.data.nodeId) : rootNid;
@@ -368,6 +364,28 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
     ] }) }) });
   }
   const DEFAULT_ORG = "BrainEduPlay";
+  const loadLexicon = async (base, tree) => {
+    const nodes = store.getPosts("node").filter((n) => n.parentId === tree.id);
+    const fetches = nodes.map(async (n) => {
+      try {
+        const r = await fetch(`${base}/lexicon/${n.data.nodeId}.json`);
+        if (!r.ok) return 0;
+        const entries = JSON.parse(await r.text());
+        let count = 0;
+        const existing = store.getPosts("lexicon").filter((x) => x.parentId === tree.id);
+        for (const l of entries) {
+          if (existing.some((x) => String(x.data.term) === String(l.data.term))) continue;
+          store.add(l.type, l.data, { parentId: tree.id });
+          count++;
+        }
+        return count;
+      } catch {
+        return 0;
+      }
+    });
+    const counts = await Promise.all(fetches);
+    return counts.reduce((a, b) => a + b, 0);
+  };
   const loadTree = async (org, repo) => {
     var _a, _b;
     try {
@@ -377,23 +395,23 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
       const treeSeeds = JSON.parse(await treeRes.text());
       const treeTitleFromSeed = ((_b = (_a = treeSeeds[0]) == null ? void 0 : _a.data) == null ? void 0 : _b.title) || "";
       const treeCount = store.importJSON(treeSeeds);
-      const lexRes = await fetch(`${base}/lexicon.json`);
-      if (!lexRes.ok) throw new Error(`lexicon.json: ${lexRes.status}`);
-      const lexSeeds = JSON.parse(await lexRes.text());
       const trees = store.getPosts("tree");
       const tree = trees.find((t) => String(t.data.title) === treeTitleFromSeed);
       if (tree) {
-        let lexCount = 0;
-        for (const l of lexSeeds) {
-          store.add(l.type, l.data, { parentId: tree.id });
-          lexCount++;
-        }
+        const lexCount = await loadLexicon(base, tree);
         sdk.log(`${repo} — ${treeCount + lexCount} rekordów`, "ok");
+        store.update(tree.id, { repo: `${org}/${repo}` });
       }
-      if (tree) store.update(tree.id, { repo: `${org}/${repo}` });
     } catch (e) {
       sdk.log(String(e), "error");
     }
+  };
+  const loadLexiconFromRepo = async (treeId, org, repo) => {
+    const tree = store.get(treeId);
+    if (!tree) return;
+    const base = `${GH_RAW}/${org}/${repo}/main`;
+    const count = await loadLexicon(base, tree);
+    sdk.log(`${repo} — ${count} nowych terminów`, "ok");
   };
   const loadNodeContent = async (treeId, nodeId) => {
     const tree = store.get(treeId);
@@ -416,7 +434,7 @@ const plugin = ({ React, ui, store, sdk, icons }) => {
       sdk.log(`Content ${nodeId}: ${e}`, "error");
     }
   };
-  sdk.shared.setState({ bqHelpers: { discover, unlockNode, edgeStr, loadNodeContent } });
+  sdk.shared.setState({ bqHelpers: { discover, unlockNode, edgeStr, loadNodeContent, loadLexiconFromRepo } });
   function RepoPicker() {
     const org = store.useOption("bq:githubOrg") || DEFAULT_ORG;
     const [repos, setRepos] = useState([]);
